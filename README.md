@@ -255,7 +255,7 @@ Phrases like “**first week of December**”, “**next month**”, “**on Nov
 ### 7) Proper-noun entities (preserve exact strings)
 
 Venue/restaurant names (Alinea, Le Bernardin, Nobu, The Fat Duck, The French Laundry, The Ivy) must be returned **verbatim**.
-**Mitigation:** Answer “what/which” with the **exact surface form** from the message—no normalization or paraphrasing.
+**Mitigation:** Answer “what/which” with the **exact surface form** from the message, no normalization or paraphrasing.
 
 ---
 
@@ -289,4 +289,5 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 # open http://localhost:8000/ask?question=...
 ```
+
 
