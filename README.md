@@ -214,7 +214,7 @@ Below are the main data quality patterns I observed, with concrete examples from
 
 ### 1) Relative dates (need normalization)
 
-Many messages use relative time (“tonight”, “this Friday”, “next Tuesday”, “next month”), which are **not explicit dates** and must be resolved **relative to the message timestamp**—or else answered with the fallback.
+Many messages use relative time (“tonight”, “this Friday”, “next Tuesday”, “next month”), which are **not explicit dates** and must be resolved **relative to the message timestamp** or else answered with the fallback.
 
 * “Please book a private jet to Paris **for this Friday**.” — *Sophia Al-Farsi*, `2025-05-05T07:47:20Z`
 * “Confirm my dinner … **tonight**.” — *Fatima El-Tahir*, `2024-11-14T20:03:44Z`
@@ -289,3 +289,4 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 # open http://localhost:8000/ask?question=...
 ```
+
