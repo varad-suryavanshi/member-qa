@@ -3,3 +3,5 @@ __pycache__/
 .venv/
 .dockerignore
 __pycache__/
+.gcloudignore
+.git

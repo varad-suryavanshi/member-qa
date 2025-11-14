@@ -9,26 +9,20 @@ load_dotenv()
 
 FALLBACK = "I don’t have enough information to answer."
 
-# ------------------------------
-# Provider/model config
-# ------------------------------
+# Model config
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 _groq = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
 
 
 
-# ------------------------------
-# Prompt builders (minimal, grounded)
-# ------------------------------
+# Prompt builders 
 SYSTEM = (
     "You are a precise assistant. Answer the QUESTION using ONLY the EVIDENCE. "
     f"If the answer is not clearly supported by the EVIDENCE, reply exactly: {FALLBACK}"
 )
 
 def build_user_prompt(question: str, snippets: List[Dict]) -> str:
-    # Keep evidence short and plain. Enable redaction by swapping to _sanitize below if desired.
     lines = [f"- [{s['user_name']} at {s['timestamp']}] {s['message']}" for s in snippets]
-    # lines = [f"- [{s['user_name']} at {s['timestamp']}] {_sanitize(s['message'])}" for s in snippets]  # <— enable to redact
     evidence = "\n".join(lines) if lines else "(none)"
     return (
         f"QUESTION:\n{question}\n\n"
@@ -39,30 +33,22 @@ def build_user_prompt(question: str, snippets: List[Dict]) -> str:
         f"- If the EVIDENCE does not clearly contain the answer, reply exactly: {FALLBACK}"
     )
 
-# ------------------------------
-# Small helpers
-# ------------------------------
+# Helpers
 def _fb(reason: str) -> str:
     """Always-on reason-tagged fallback."""
     return f"{FALLBACK} ({reason})"
 
 def _postprocess(text: str) -> str:
     ans = (text or "").strip()
-    # strip enclosing quotes
     if (ans.startswith('"') and ans.endswith('"')) or (ans.startswith('“') and ans.endswith('”')):
         ans = ans[1:-1].strip()
-    # keep short
     if len(ans) > 500:
         ans = ans[:500].rstrip()
     return ans
 
 
-
-# ------------------------------
-# Core function (always-on reasoned fallbacks)
-# ------------------------------
+# Core function 
 def synthesize_answer(question: str, snippets: List[Dict]) -> str:
-    # If no key, strict fallback with reason
     if not _groq.api_key:
         return _fb("no API/model key")
 

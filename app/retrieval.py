@@ -1,8 +1,6 @@
 # app/retrieval.py
 import os, time, threading, requests, numpy as np, heapq, re
 from typing import Optional
-# ❌ REMOVE eager heavy imports here:
-# from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 
 MESSAGES_URL_BASE = os.getenv(
@@ -75,6 +73,7 @@ class MessageStore:
         self._lock = threading.Lock()
 
     def _ensure_models(self):
+        """Load heavy models lazily, once."""
         if self._models_ready:
             return
         with self._lock:
@@ -82,13 +81,13 @@ class MessageStore:
                 return
             os.environ.setdefault("HF_HOME", os.getenv("HF_HOME", "/var/tmp/hf-cache"))
             os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", os.getenv("SENTENCE_TRANSFORMERS_HOME", "/var/tmp/hf-cache"))
-            # ✅ Import heavy libs only here, not at module import
             from sentence_transformers import SentenceTransformer, CrossEncoder
             self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
             self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
             self._models_ready = True
 
     def _fetch(self):
+        """Refresh messages and indexes."""
         data = _safe_fetch_messages()
         items = data.get("items", [])
         texts = [f"{it['user_name']} | {it['timestamp']} | {it['message']}" for it in items]
@@ -108,6 +107,7 @@ class MessageStore:
             self._last_fetch = time.time()
 
     def _warm_background(self):
+        """Kick off a non-blocking warmup."""
         def _bg():
             try:
                 self._ensure_models()
@@ -117,6 +117,7 @@ class MessageStore:
         threading.Thread(target=_bg, daemon=True).start()
 
     def ensure_fresh(self):
+        """Ensure models are loaded and data is recent."""
         self._ensure_models()
         if self.embeddings is None or (time.time() - self._last_fetch) > _REFRESH_SEC:
             self._fetch()
@@ -140,13 +141,14 @@ class MessageStore:
         return idx.tolist()
 
     def search(self, query: str, user_name: Optional[str] = None, top_k: int = 10):
+        """BM25 + embedding recall, RRF fuse, optional CrossEncoder rerank."""
         self.ensure_fresh()
         bm_idx = self._bm25_topn(query, N=100)
         em_idx = self._embedding_topn(query, user_name, N=100)
 
         ranks = {}
-        for r, i in enumerate(bm_idx): ranks.setdefault(i, []).append(r+1)
-        for r, i in enumerate(em_idx): ranks.setdefault(i, []).append(r+1)
+        for r, i in enumerate(bm_idx): ranks.setdefault(i, []).append(r + 1)
+        for r, i in enumerate(em_idx): ranks.setdefault(i, []).append(r + 1)
         rrf_scores = _rrf(ranks, k=60)
 
         topM = heapq.nlargest(60, rrf_scores.items(), key=lambda kv: kv[1])
@@ -154,7 +156,6 @@ class MessageStore:
         if not cand_idx:
             return []
 
-        # Rerank if model ready, otherwise return BM25 top_k
         if self._models_ready:
             from numpy import asarray
             pairs = [(query, self.texts[i]) for i in cand_idx]
@@ -175,13 +176,10 @@ class MessageStore:
             })
         return results
 
-# ✅ Lazy singleton for the store
+# Lazy singleton
 _store_singleton = None
 def get_store() -> MessageStore:
     global _store_singleton
     if _store_singleton is None:
         _store_singleton = MessageStore()
     return _store_singleton
-
-# ❌ Remove: eager global initialization
-# store = MessageStore()

@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 fastapi==0.121.1
 uvicorn[standard]==0.38.0
 pydantic==2.12.4
@@ -8,3 +10,10 @@ sentence-transformers==5.1.2
 rank-bm25==0.2.2
 numpy==2.0.2
 rapidfuzz==3.14.3
+
+
+torch==2.4.1
+transformers==4.44.2
+scikit-learn==1.5.2
+scipy==1.13.1
+sentencepiece==0.2.0

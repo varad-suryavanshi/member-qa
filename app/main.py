@@ -1,12 +1,12 @@
 # app/main.py
-import re
 from functools import lru_cache
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import logging, traceback
 
 from .schemas import AskResponse
-from . import retrieval  # ← import the module, not `store`
+from . import retrieval
 from .utils import (
     detect_topic,
     extract_candidate_name,
@@ -29,11 +29,11 @@ app.add_middleware(
 
 @lru_cache(maxsize=1)
 def get_store():
-    return retrieval.get_store()   # lazy singleton from retrieval.py
+    return retrieval.get_store()
 
 @app.on_event("startup")
 async def startup_event():
-    # Don’t block startup; kick a tiny background warmup after bind
+    # Warm caches/models shortly after bind without blocking startup
     import asyncio
     async def _warm():
         await asyncio.sleep(0.2)
@@ -51,6 +51,8 @@ def health():
 def root():
     return {"ok": True, "endpoints": ["/health", "/ask?question=..."]}
 
+logger = logging.getLogger("uvicorn.error")
+
 @app.get("/ask", response_model=AskResponse)
 def ask(
     question: str = Query(..., description="Natural language question"),
@@ -60,10 +62,17 @@ def ask(
 
     store = get_store()
     try:
-        store.ensure_fresh()  # may fetch + first-time load, but only after bind
-    except Exception:
+        store.ensure_fresh()
+    except Exception as e:
+        logger.error("ensure_fresh failed: %r\n%s", e, traceback.format_exc(), exc_info=False)
+        if debug:
+            return JSONResponse(
+                status_code=503,
+                content={"answer": "init failed", "error": repr(e)},
+            )
         return JSONResponse(
-            content={"answer": "I couldn’t reach the messages API right now. Please try again in a moment."}
+            status_code=503,
+            content={"answer": "I couldn’t reach the messages API right now. Please try again in a moment."},
         )
 
     name, _ = extract_candidate_name(q, store.user_names)
@@ -72,7 +81,6 @@ def ask(
     query = q if topic == "general" else f"{q} topic:{topic}"
     snippets = store.search(query, user_name=name, top_k=10)
 
-    # focus/type guards unchanged…
     low = q.lower()
     focus = extract_focus_terms(q, name)
     if focus:
@@ -95,8 +103,10 @@ def ask(
         return JSONResponse(content={"answer": "I don’t have enough information to answer from the messages.(no evidence at all)"})
 
     answer = synthesize_answer(q, snippets)
-    if debug and isinstance(answer, dict):
-        return {
+
+    # When debug is on, return richer payload (bypass response_model filtering)
+    if debug:
+        payload = {
             "question": question,
             "person_detected": name,
             "topic": topic,
@@ -104,8 +114,12 @@ def ask(
             "snippets_checked": [
                 {"user": s["user_name"], "ts": s["timestamp"], "msg": s["message"]} for s in snippets
             ],
-            "llm_debug": answer,
-            "answer": answer.get("final"),
         }
+        if isinstance(answer, dict):
+            payload["llm_debug"] = answer
+            payload["answer"] = answer.get("final")
+        else:
+            payload["answer"] = answer
+        return JSONResponse(content=payload)
 
     return JSONResponse(content={"answer": answer if not isinstance(answer, dict) else answer.get("final")})

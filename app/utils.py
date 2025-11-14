@@ -3,30 +3,14 @@ import re
 from typing import List, Optional, Tuple
 from rapidfuzz import fuzz, process
 
-
-# -----------------------------
-# Basic text helpers
-# -----------------------------
-
 def normalize_text(s: str) -> str:
-    """Collapse whitespace and strip ends."""
+    """Trim + collapse whitespace."""
     return " ".join(s.strip().split())
 
-# -----------------------------
-# Name extraction (fuzzy)
-# -----------------------------
-
 def extract_candidate_name(question: str, all_names: List[str]) -> Tuple[Optional[str], float]:
-    """
-    Fuzzy match the person's name from the question against known user names.
-    Returns (best_name, score). Score ~0..100. Returns (None, 0.0) if nothing reasonable.
-    """
-    # Try longest capitalized span first; fallback to full question
+    """Fuzzy-match a person name from the question against known names."""
     caps = re.findall(r"[A-Z][a-zA-Z'’\-]+(?:\s+[A-Z][a-zA-Z'’\-]+)*", question)
-    queries = []
-    if caps:
-        # Use the longest capitalized span (likely the person's name)
-        queries.append(max(caps, key=len))
+    queries = [max(caps, key=len)] if caps else []
     queries.append(question)
 
     best_name, best_score = None, 0.0
@@ -36,19 +20,10 @@ def extract_candidate_name(question: str, all_names: List[str]) -> Tuple[Optiona
             cand, score, _ = match
             if score > best_score:
                 best_name, best_score = cand, float(score)
-    # Only accept if reasonably confident
-    if best_score >= 70.0:
-        return best_name, best_score
-    return None, 0.0
-
-# -----------------------------
-# Topic heuristic (optional)
-# -----------------------------
+    return (best_name, best_score) if best_score >= 70.0 else (None, 0.0)
 
 def detect_topic(question: str) -> str:
-    """
-    Very light topic classifier for optional query decoration.
-    """
+    """Very light keyword-based topic tag."""
     q = question.lower()
     if any(k in q for k in ["book", "flight", "hotel", "suite", "room", "villa", "check-in", "itinerary", "trip", "travel"]):
         return "travel"
@@ -57,12 +32,6 @@ def detect_topic(question: str) -> str:
     if any(k in q for k in ["invoice", "billing", "charge", "payment", "renewal", "transaction", "points", "loyalty"]):
         return "billing"
     return "general"
-
-# -----------------------------
-# Focus terms (general coverage gate)
-# -----------------------------
-
-
 
 _GENERIC = {
     "what","which","who","when","where","why","how","much","many",
@@ -75,10 +44,7 @@ _GENERIC = {
 _WORD = re.compile(r"[a-zA-Z][a-zA-Z\-']+")
 
 def extract_focus_terms(question: str, person_name: Optional[str]) -> List[str]:
-    """
-    Extract specific 'focus' terms that should appear in the evidence for us to answer.
-    Removes the person's name and generic utility words. Keeps quoted phrases and up to 5 items.
-    """
+    """Return up to 5 specific terms/phrases to gate evidence."""
     q = question.strip()
 
     # Keep quoted phrases verbatim
@@ -90,15 +56,11 @@ def extract_focus_terms(question: str, person_name: Optional[str]) -> List[str]:
 
     focus_words: List[str] = []
     for w in words:
-        if len(w) <= 2:
-            continue
-        if w in name_tokens:
-            continue
-        if w in _GENERIC:
-            continue
+        if len(w) <= 2: continue
+        if w in name_tokens: continue
+        if w in _GENERIC: continue
         focus_words.append(w)
 
-    # Prefer phrases first, then words; dedupe; cap length
     out: List[str] = []
     seen = set()
     for t in phrases + focus_words:
@@ -108,36 +70,27 @@ def extract_focus_terms(question: str, person_name: Optional[str]) -> List[str]:
             out.append(t)
     return out[:5]
 
-
-# -----------------------------
-# Evidence-type detectors
-# -----------------------------
-
-
-
-# Compile once at import
 _DATEISH = re.compile(
     r"""
-    (?:\b\d{4}-\d{2}-\d{2}\b)                              # 2025-11-10
-  | (?:\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b)            # 11/10, 11-10-2025
+    (?:\b\d{4}-\d{2}-\d{2}\b)
+  | (?:\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b)
   | (?:\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)
         (?:uary|ch|ril|e|y|e|y|ust|tember|ober|ember)?
-        \s+\d{1,2}(?:,\s*\d{4})?\b)                       # Nov 10, 2025 / November 10
-  | (?:\b(?:today|tomorrow|tonight|tonite|yesterday)\b)   # relative day words
+        \s+\d{1,2}(?:,\s*\d{4})?\b)
+  | (?:\b(?:today|tomorrow|tonight|tonite|yesterday)\b)
   | (?:\b(?:this|next|coming)?\s*
         (?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun
-        |monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b)  # (this) Friday
-  | (?:\b(?:this|next)\s+(?:week|weekend|month|quarter|year)\b)        # this weekend / next month
+        |monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b)
+  | (?:\b(?:this|next)\s+(?:week|weekend|month|quarter|year)\b)
   | (?:\b(?:first|second|third|fourth)\s+week\s+of\s+
         (?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec
-        |january|february|march|april|may|june|july|august|september|october|november|december)\b)  # first week of December
+        |january|february|march|april|may|june|july|august|september|october|november|december)\b)
     """,
     re.IGNORECASE | re.VERBOSE,
 )
 
 def has_dateish(text: str) -> bool:
     return bool(_DATEISH.search(text or ""))
-
 
 _NUMBER_WORDS = {
     "zero","one","two","three","four","five","six","seven","eight","nine","ten",
@@ -147,13 +100,8 @@ _NUMBER_WORDS = {
 }
 
 def has_quantityish(text: str) -> bool:
-    """True if the text contains a digit or a spelled-out number word."""
-    t = text.lower()
+    """True if text contains a digit or number word."""
+    t = (text or "").lower()
     if re.search(r"\b\d+\b", t):
         return True
     return any(w in t for w in _NUMBER_WORDS)
-
-
-
-
-
